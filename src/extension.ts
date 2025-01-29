@@ -36,8 +36,12 @@ export function activate(context: vscode.ExtensionContext) {
 				messageHistory.push({role: 'user', content: userPrompt});
 
 				try{
+
+					const configuration = vscode.workspace.getConfiguration('zoomiverse-ai');
+                    const modelName = configuration.get<string>('ollamaModel', 'deepseek-r1:1.5b');
+					
 					const streamResponse = await ollama.chat({
-						model: 'deepseek-r1:1.5b',
+						model: modelName,
 						messages: messageHistory,
 						stream: true,
 					});
@@ -98,7 +102,7 @@ function getWebviewContent(webview: vscode.Webview) : string {
 			</style>
 		</head>
 		<body>
-			<h2 style="margin: 1rem;">⚡ Zoomiverse AI</h2>
+			<h2 style="margin: 1rem;">⚡ Zoomiverse</h2>
 			<button id="clear">Clear</button>
 			<div id="chat-container">
 				<div id="response"></div>
@@ -109,17 +113,33 @@ function getWebviewContent(webview: vscode.Webview) : string {
 
 			<script>
 
+				const chatElement = document.getElementById('chat');
+				const responseDiv = document.getElementById('response');				
+
 				const vscode = acquireVsCodeApi();
 				let currentMessage = null;
 				let running = false;
+				let lastPrompt = '';
 
 				document.getElementById('chat').addEventListener('keydown', event => {
 					if (event.code === 'Enter' && !event.shiftKey && !running) {
+						
 						event.preventDefault();
-						running = true;
-						const text = document.getElementById('chat').value;
+						
+						running = true;								
+						chatElement.disabled = true;	
+
+						lastPrompt = chatElement.value;	
+						const text = chatElement.value;
 						vscode.postMessage({ command:'chat', text });
 						addMessage('user', text);
+					}
+					if(event.code === 'ArrowUp' && !running){
+						chatElement.value = lastPrompt;
+						if(chatElement.value.length > 0){
+							chatElement.selectionStart = 0;
+							chatElement.selectionEnd = chatElement.value.length - 1;
+						}
 					}
 				});
 
@@ -133,41 +153,39 @@ function getWebviewContent(webview: vscode.Webview) : string {
 						currentMessage = addMessage('bot', '');
 					}
 					if (message.command === 'chatResponse') {
-						currentMessage.innerHTML = message.text.replace('<think>', '<div class="think">').replace('</think>', '</div>') + '•••';
-						
+						currentMessage.innerHTML = message.text.replace('<think>', '<div class="think">').replace('</think>', '</div>') + '•••';					
 						hljs.highlightAll();
-
-						const responseDiv = document.getElementById('response');
 						responseDiv.scrollTop = responseDiv.scrollHeight + 100;
 					}
 					if (message.command === 'chatResponseComplete') {
 						currentMessage.innerHTML = currentMessage.innerHTML.replace('•••', '');
 						currentMessage = null;
-						running = false;
-						document.getElementById('chat').value = '';
-						document.getElementById('chat').focus();
+						resetChat();
 					}
 					if (message.command === 'clearChat') {
                         clearChat();
 						currentMessage = null;
-						running = false;
-						document.getElementById('chat').value = '';
                     }
 				});
 
-				function addMessage(role, text) {
-                    const responseDiv = document.getElementById('response');
-                    const messageDiv = document.createElement('div');
+				function resetChat() {
+					running = false;
+					chatElement.disabled = false;
+					chatElement.value = '';
+					chatElement.focus();
+				}
+
+				function addMessage(role, text) {    
+					const messageDiv = document.createElement('div');                
                     messageDiv.className = 'message ' + role;
                     messageDiv.innerHTML = text;
                     responseDiv.appendChild(messageDiv);
 					return messageDiv;
                 }
 
-				function clearChat() {
-                    const responseDiv = document.getElementById('response');
+				function clearChat() {                    
                     responseDiv.innerHTML = '';
-					document.getElementById('chat').focus();
+					resetChat();
                 }
 
 				document.getElementById('chat').focus();

@@ -1,6 +1,6 @@
 {
   "name": "zoomiverse-ai",
-  "displayName": "Zoomiverse AI",
+  "displayName": "Zoomiverse",
   "description": "AI Chat Client",
   "version": "0.0.1",
   "engines": {
@@ -12,6 +12,17 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Zoomiverse AI Settings",
+      "properties": {
+        "zoomiverse-ai.ollamaModel": {
+          "type": "string",
+          "default": "deepseek-r1:1.5b",
+          "description": "The ai model name to use for chat responses."
+        }
+      }
+    },
     "commands": [
       {
         "command": "zoomiverse-ai.start",
