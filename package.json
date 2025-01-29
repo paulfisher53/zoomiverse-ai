@@ -15,7 +15,7 @@
     "commands": [
       {
         "command": "zoomiverse-ai.start",
-        "title": "Start Zoomiverse AI"
+        "title": "Open Zoomiverse AI"
       }
     ]
   },

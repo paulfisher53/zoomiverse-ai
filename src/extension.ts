@@ -13,7 +13,7 @@ export function activate(context: vscode.ExtensionContext) {
 		
 		const panel = vscode.window.createWebviewPanel(
 			'zoomiverse-ai',
-			'Zoomiverse Chat',
+			'Chat Window',
 			vscode.ViewColumn.Beside,
 			{ enableScripts: true }
 		);
@@ -23,8 +23,9 @@ export function activate(context: vscode.ExtensionContext) {
 		const messageHistory: ChatMessage[] = [];
 
 		panel.webview.onDidReceiveMessage(async (message) => {
-			console.log(message);
+
 			if (message.command === 'clearChat') {
+				ollama.abort();
 				panel.webview.postMessage({ command: 'clearChat' });
 				messageHistory.length = 0;
 			}
@@ -35,11 +36,10 @@ export function activate(context: vscode.ExtensionContext) {
 				messageHistory.push({role: 'user', content: userPrompt});
 
 				try{
-					
 					const streamResponse = await ollama.chat({
 						model: 'deepseek-r1:1.5b',
-						messages: messageHistory ,
-						stream: true
+						messages: messageHistory,
+						stream: true,
 					});
 
 					panel.webview.postMessage({ command: 'chatResponseStart' });
@@ -53,11 +53,14 @@ export function activate(context: vscode.ExtensionContext) {
 					messageHistory.push({role: 'assistant', content: responseText});
 					panel.webview.postMessage({ command: 'chatResponseComplete' });
 					
-				}catch(e){
+				} catch (e) {
+					if (String(e).startsWith('AbortError')) {
+						return;
+					}
 					panel.webview.postMessage({ command: 'chatResponseStart' });
 					panel.webview.postMessage({ command: 'chatResponse', text: `Error: ${String(e)}` });
 					panel.webview.postMessage({ command: 'chatResponseComplete' });
-				}
+                }
 			}
 		});
 
@@ -88,13 +91,14 @@ function getWebviewContent(webview: vscode.Webview) : string {
                 #chat-input { position: absolute; bottom: 0; left: 0; right: 0; display: flex; }
                 #chat { flex: 1; border-radius: 0.5rem; background-color: #414141; color: white; padding: 0.5rem 1rem; border-color: lightblue; }
 				#clear { margin: 1rem; padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; }
+				div.think { color: #999; text-style: italic; }
                 .message { margin-bottom: 1rem; clear: both; }
                 .user { background-color: #414141; border-radius: 0.5rem; color: white; padding: 0.5rem 1rem; float: right; }
                 .bot {color: white; padding: 0.5rem 1rem; float: left; }
 			</style>
 		</head>
 		<body>
-			<h2 style="margin: 1rem;">Zoomiverse Chat</h2>
+			<h2 style="margin: 1rem;">⚡ Zoomiverse AI</h2>
 			<button id="clear">Clear</button>
 			<div id="chat-container">
 				<div id="response"></div>
@@ -107,14 +111,15 @@ function getWebviewContent(webview: vscode.Webview) : string {
 
 				const vscode = acquireVsCodeApi();
 				let currentMessage = null;
+				let running = false;
 
 				document.getElementById('chat').addEventListener('keydown', event => {
-					if (event.code === 'Enter' && !event.shiftKey) {
+					if (event.code === 'Enter' && !event.shiftKey && !running) {
 						event.preventDefault();
+						running = true;
 						const text = document.getElementById('chat').value;
 						vscode.postMessage({ command:'chat', text });
 						addMessage('user', text);
-						document.getElementById('chat').value = '';
 					}
 				});
 
@@ -128,19 +133,25 @@ function getWebviewContent(webview: vscode.Webview) : string {
 						currentMessage = addMessage('bot', '');
 					}
 					if (message.command === 'chatResponse') {
-						currentMessage.innerHTML = message.text;
-						const responseDiv = document.getElementById('response');
-
+						currentMessage.innerHTML = message.text.replace('<think>', '<div class="think">').replace('</think>', '</div>') + '•••';
+						
 						hljs.highlightAll();
 
+						const responseDiv = document.getElementById('response');
 						responseDiv.scrollTop = responseDiv.scrollHeight + 100;
 					}
 					if (message.command === 'chatResponseComplete') {
+						currentMessage.innerHTML = currentMessage.innerHTML.replace('•••', '');
 						currentMessage = null;
+						running = false;
+						document.getElementById('chat').value = '';
 						document.getElementById('chat').focus();
 					}
 					if (message.command === 'clearChat') {
                         clearChat();
+						currentMessage = null;
+						running = false;
+						document.getElementById('chat').value = '';
                     }
 				});
 
