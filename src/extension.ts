@@ -146,9 +146,12 @@ function getWebviewContent(webview: vscode.Webview) : string {
                 #response { flex: 1; margin: 1rem; padding: 1rem; max-height: calc(100vh - 200px); overflow-y: auto; padding-bottom: 30px; box-sizing: border-box; max-width: 90%; }
                 #chat-input { position: absolute; bottom: 0; left: 0; right: 0; display: flex; }
                 #chat { flex: 1; border-radius: 0.5rem; background-color: #414141; color: white; padding: 0.5rem 1rem; border-color: lightblue; }
-				#clear { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; border: none; background-color: transparent; color: white; }
-				#model-select { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 200px; font-size: 0.6rem; border: none; background-color: transparent; color: white; }
-				div.think { color: #999; text-style: italic; }
+				#clear { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer;  }
+				#model-select { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 200px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer; }
+				div.think { color: #999; text-style: italic; width: 80px; max-height: 1rem; overflow: hidden; cursor: pointer; }
+				div.think::before { content: 'Thinking...'; }
+				.expanded div.think::before { content: ''; }
+				.expanded div.think { max-height: unset; width: unset; }
                 .message { margin-bottom: 1rem; clear: both; }
                 .user { background-color: #414141; border-radius: 0.5rem; color: white; padding: 0 1rem; float: right; }
                 .bot,.assistant {color: white; padding: 0.5rem 1rem; float: left; }
@@ -179,6 +182,12 @@ function getWebviewContent(webview: vscode.Webview) : string {
 				let currentMessage = null;
 				let running = false;
 				let lastPrompt = '';
+
+				document.addEventListener('click', (event) => {
+					if(!running && event.target && event.target.className === 'think'){
+						event.target.parentElement.classList.toggle('expanded');
+					}
+				});
 
 				chatElement.addEventListener('keydown', event => {
 					if (event.code === 'Enter' && !event.shiftKey && !running) {
@@ -220,15 +229,22 @@ function getWebviewContent(webview: vscode.Webview) : string {
 
 					if (message.command === '${COMMANDS.RESPONSE_START}') {
 						currentMessage = addMessage('bot', '');
+						currentMessage.style.cursor = 'pointer';
+						currentMessage.addEventListener('click', () => {
+							if(currentMessage){
+								currentMessage.classList.toggle('expanded');
+							}
+						});
 					}
 
 					if (message.command === '${COMMANDS.RESPONSE}') {
-						currentMessage.innerHTML = message.text.replace('<think>', '<div class="think">').replace('</think>', '</div>') + '•••';					
+						currentMessage.innerHTML = fixThinkTags(message.text) + '•••';					
 						processResponse();
 					}
 
 					if (message.command === '${COMMANDS.RESPONSE_COMPLETE}') {
 						currentMessage.innerHTML = currentMessage.innerHTML.replace('•••', '');
+						currentMessage.style.cursor = '';
 						currentMessage = null;
 						resetChat();
 					}
@@ -252,10 +268,14 @@ function getWebviewContent(webview: vscode.Webview) : string {
 					responseDiv.scrollTop = responseDiv.scrollHeight + 100;
 				}
 
+				function fixThinkTags(text) {
+					return text.replace('<think>', '<div class="think">').replace('</think>', '</div>');
+				}
+
 				function restoreChat(savedChatHistory) {
 					responseDiv.innerHTML = '';
 					savedChatHistory.forEach(message => {
-						addMessage(message.role, message.content);
+						addMessage(message.role, fixThinkTags(message.content));
 					});
 					processResponse();
 				}
