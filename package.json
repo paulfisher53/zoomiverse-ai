@@ -3,6 +3,11 @@
   "displayName": "Zoomiverse",
   "description": "AI Chat Client",
   "version": "0.0.1",
+  "publisher": "Zoom Apps",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paulfisher53/zoomiverse-ai.git"
+  },
   "engines": {
     "vscode": "^1.96.0"
   },
