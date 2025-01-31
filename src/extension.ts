@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 			'zoomiverse-ai',
 			'Chat Window',
 			vscode.ViewColumn.Beside,
-			{ enableScripts: true }
+			{ enableScripts: true, retainContextWhenHidden: true }
 		);
 
 		panel.webview.html = getWebviewContent(panel.webview);
