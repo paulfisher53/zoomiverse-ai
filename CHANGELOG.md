@@ -1,3 +1,7 @@
+## [0.1.2]
+
+- Fix icon :P
+
 ## [0.1.1]
 
 - Added icon
