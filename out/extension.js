@@ -72,6 +72,9 @@ function activate(context) {
         panel.webview.postMessage({
             command: COMMANDS.RESTORE_CHAT,
             savedChatHistory: messageHistory.map(message => {
+                if (message.role === 'user' && message.content.length > 1000) {
+                    message.content = message.content.substring(0, 1000) + '...';
+                }
                 return {
                     role: message.role,
                     content: (0, marked_1.marked)(message.content)
@@ -85,7 +88,6 @@ function activate(context) {
                 messageHistory.length = 0;
             }
             if (message.command === COMMANDS.CHAT) {
-                ;
                 let responseText = '';
                 messageHistory.push({ role: 'user', content: message.text });
                 try {
@@ -151,7 +153,7 @@ function getWebviewContent(webview) {
 				body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
                 #chat-container { display: flex; flex-direction: column; flex: 1; }
                 #response { flex: 1; margin: 1rem; padding: 1rem; max-height: calc(100vh - 200px); overflow-y: auto; padding-bottom: 30px; box-sizing: border-box; max-width: 90%; }
-                #chat-input { position: absolute; bottom: 0; left: 0; right: 0; display: flex; }
+                #chat-input { font-family: Arial, sans-serif; position: absolute; bottom: 0; left: 0; right: 0; display: flex; }
                 #chat { flex: 1; border-radius: 0.5rem; background-color: #414141; color: white; padding: 0.5rem 1rem; border-color: lightblue; }
 				#clear { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer;  }
 				#model-select { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 200px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer; }
