@@ -62,7 +62,7 @@ function activate(context) {
     const disposable = vscode.commands.registerCommand('zoomiverse-ai.start', () => {
         const messageHistory = [];
         const configuration = vscode.workspace.getConfiguration('zoomiverse-ai');
-        const panel = vscode.window.createWebviewPanel('zoomiverse-ai', 'Chat Window', vscode.ViewColumn.Beside, { enableScripts: true });
+        const panel = vscode.window.createWebviewPanel('zoomiverse-ai', 'Chat Window', vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true });
         panel.webview.html = getWebviewContent(panel.webview);
         // Load settings.
         let currentModelName = configuration.get(CONFIG.MODEL, 'deepseek-r1:1.5b');

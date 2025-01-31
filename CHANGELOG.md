@@ -1,3 +1,7 @@
+## [0.1.3]
+
+- Fix window losing context when hidden
+
 ## [0.1.2]
 
 - Fix icon :P
