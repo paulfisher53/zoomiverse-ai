@@ -2,7 +2,8 @@
   "name": "zoomiverse-ai",
   "displayName": "Zoomiverse",
   "description": "AI Chat Client",
-  "version": "0.0.1",
+  "version": "0.1.1",
+  "icon": "icon.json",
   "publisher": "ZoomApps",
   "repository": {
     "type": "git",
@@ -31,7 +32,7 @@
     "commands": [
       {
         "command": "zoomiverse-ai.start",
-        "title": "Open Zoomiverse AI"
+        "title": "Zoomiverse: Start Chat"
       }
     ]
   },

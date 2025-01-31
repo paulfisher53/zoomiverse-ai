@@ -1,0 +1,9 @@
+{
+    "scopes": ["editor"],
+    "relaunch": true,
+    "icon": {
+      "16": "icons/Bolt-16.png",
+      "32": "icons/Bolt-32.png",
+      "48": "icons/Bolt-48.png"
+    }
+  }
