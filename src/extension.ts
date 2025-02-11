@@ -7,6 +7,13 @@ interface ChatMessage {
 	content: string;
 }
 
+interface ChatSession {
+    id: string;
+    name: string;
+    messages: ChatMessage[];
+    timestamp: number;
+}
+
 const COMMANDS = {
 	CHAT: 'chat',
 	RESPONSE_START: 'chatResponseStart',
@@ -17,10 +24,15 @@ const COMMANDS = {
 	SET_MODEL: 'setModel',
 	GET_MODELS: 'getModels',
 	RESTORE_CHAT: 'restoreChat',
+    NEW_SESSION: 'newSession',
+    DELETE_SESSION: 'deleteSession',
+    SWITCH_SESSION: 'switchSession',
+    UPDATE_SESSIONS: 'updateSessions',
 };
 
 const STATE = {
-	chatHistory: 'chatHistory',
+	sessions: 'chatSessions',
+    currentSessionId: 'currentSessionId'
 };
 
 const CONFIG = {
@@ -31,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const disposable = vscode.commands.registerCommand('zoomiverse-ai.start', () => {
 		
-		const messageHistory: ChatMessage[] = [];
+		let messageHistory: ChatMessage[] = [];
 		const configuration = vscode.workspace.getConfiguration('zoomiverse-ai');
 		const panel = vscode.window.createWebviewPanel(
 			'zoomiverse-ai',
@@ -42,32 +54,145 @@ export function activate(context: vscode.ExtensionContext) {
 
 		panel.webview.html = getWebviewContent(panel.webview);
 
-		// Load settings.
+		// Load settings
 		let currentModelName = configuration.get<string>(CONFIG.MODEL, 'deepseek-r1:1.5b');
+        
+        // Load sessions
+        const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+        let currentSessionId = context.globalState.get<string>(STATE.currentSessionId, '');
+        
+        // Create default session if none exists
+        if (sessions.length === 0) {
+            const defaultSession: ChatSession = {
+                id: generateId(),
+                name: 'Default Session',
+                messages: [],
+                timestamp: Date.now()
+            };
+            sessions.push(defaultSession);
+            currentSessionId = defaultSession.id;
+            context.globalState.update(STATE.sessions, sessions);
+            context.globalState.update(STATE.currentSessionId, currentSessionId);
+        }
 
-		// Load state.
-        const savedChatHistory = context.globalState.get<ChatMessage[]>(STATE.chatHistory, []);
-        messageHistory.push(...savedChatHistory);		
+        // Load current session
+        const currentSession = sessions.find(s => s.id === currentSessionId) || sessions[0];
+        messageHistory = [...currentSession.messages];
+        
+        // Update UI with sessions and messages
         panel.webview.postMessage({ 
-			command: COMMANDS.RESTORE_CHAT, 
-			savedChatHistory: messageHistory.map(message => {
-				if(message.role === 'user' && message.content.length > 1000){
-					message.content = message.content.substring(0,1000) + '...';
-				}
-				return { 
-					role: message.role, 
-					content: marked(message.content) 
-				};
-			}) 
-		});
+            command: COMMANDS.UPDATE_SESSIONS, 
+            sessions: sessions,
+            currentSessionId: currentSessionId
+        });
+        
+        panel.webview.postMessage({ 
+            command: COMMANDS.RESTORE_CHAT, 
+            savedChatHistory: messageHistory.map(message => ({
+                role: message.role, 
+                content: marked(message.content)
+            }))
+        });
 
 		panel.webview.onDidReceiveMessage(async (message) => {
+            async function saveCurrentSession() {
+                const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+                const sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+                if (sessionIndex !== -1) {
+                    sessions[sessionIndex].messages = messageHistory;
+                    sessions[sessionIndex].timestamp = Date.now();
+                    await context.globalState.update(STATE.sessions, sessions);
+                }
+            }
 
 			if (message.command === COMMANDS.CLEAR_CHAT) {
 				ollama.abort();
 				panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
-				messageHistory.length = 0;
+				messageHistory = [];
+                await saveCurrentSession();
 			}
+
+            if (message.command === COMMANDS.NEW_SESSION) {
+
+
+				vscode.window.showInputBox({
+					prompt: 'Enter a name for the new session'
+				}).then(async (name) => {
+
+					if(!name){
+						return;
+					}
+
+					const newSession: ChatSession = {
+						id: generateId(),
+						name: name,
+						messages: [],
+						timestamp: Date.now()
+					};
+					const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+					sessions.push(newSession);
+					currentSessionId = newSession.id;
+					messageHistory = [];
+					await context.globalState.update(STATE.sessions, sessions);
+					await context.globalState.update(STATE.currentSessionId, currentSessionId);
+					panel.webview.postMessage({ 
+						command: COMMANDS.UPDATE_SESSIONS, 
+						sessions: sessions,
+						currentSessionId: currentSessionId
+					});
+					panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
+
+				});
+            }
+
+            if (message.command === COMMANDS.DELETE_SESSION) {
+                let sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+                sessions = sessions.filter(s => s.id !== message.sessionId);
+                if (sessions.length === 0) {
+                    const defaultSession: ChatSession = {
+                        id: generateId(),
+                        name: 'Default Session',
+                        messages: [],
+                        timestamp: Date.now()
+                    };
+                    sessions.push(defaultSession);
+                }
+                if (currentSessionId === message.sessionId) {
+                    currentSessionId = sessions[0].id;
+                    messageHistory = [...sessions[0].messages];
+                    panel.webview.postMessage({ 
+                        command: COMMANDS.RESTORE_CHAT, 
+                        savedChatHistory: messageHistory.map(message => ({
+                            role: message.role, 
+                            content: marked(message.content)
+                        }))
+                    });
+                }
+                await context.globalState.update(STATE.sessions, sessions);
+                await context.globalState.update(STATE.currentSessionId, currentSessionId);
+                panel.webview.postMessage({ 
+                    command: COMMANDS.UPDATE_SESSIONS, 
+                    sessions: sessions,
+                    currentSessionId: currentSessionId
+                });
+            }
+
+            if (message.command === COMMANDS.SWITCH_SESSION) {
+                const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+                const session = sessions.find(s => s.id === message.sessionId);
+                if (session) {
+                    currentSessionId = session.id;
+                    messageHistory = [...session.messages];
+                    await context.globalState.update(STATE.currentSessionId, currentSessionId);
+                    panel.webview.postMessage({ 
+                        command: COMMANDS.RESTORE_CHAT, 
+                        savedChatHistory: messageHistory.map(message => ({
+                            role: message.role, 
+                            content: marked(message.content)
+                        }))
+                    });
+                }
+            }
 
 			if (message.command === COMMANDS.CHAT) {
 
@@ -102,6 +227,7 @@ export function activate(context: vscode.ExtensionContext) {
 					panel.webview.postMessage({ command: COMMANDS.RESPONSE, text: `Error: ${String(e)}` });
 					panel.webview.postMessage({ command: COMMANDS.RESPONSE_COMPLETE });
                 }
+                await saveCurrentSession();
 			}
 
 			if (message.command === COMMANDS.GET_MODELS) {
@@ -121,7 +247,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 		panel.onDidDispose(() => {
 			ollama.abort();
-            context.globalState.update(STATE.chatHistory, messageHistory);
+            const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+            const sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+            if (sessionIndex !== -1) {
+                sessions[sessionIndex].messages = messageHistory;
+                sessions[sessionIndex].timestamp = Date.now();
+                context.globalState.update(STATE.sessions, sessions);
+            }
         });
 	});
 
@@ -129,12 +261,15 @@ export function activate(context: vscode.ExtensionContext) {
 	
 }
 
+function generateId(): string {
+    return Math.random().toString(36).substring(2, 15);
+}
+
 function getWebviewContent(webview: vscode.Webview) : string {
 	return /*html*/`
 		<!DOCTYPE html>
 		<html lang="en">
 		<head>
-			
 			<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://unpkg.com; style-src 'unsafe-inline' https://unpkg.com;">
     
             
@@ -149,7 +284,7 @@ function getWebviewContent(webview: vscode.Webview) : string {
                 #response { flex: 1; margin: 1rem; padding: 1rem; max-height: calc(100vh - 200px); overflow-y: auto; padding-bottom: 30px; box-sizing: border-box; max-width: 90%; }
                 #chat-input { font-family: Arial, sans-serif; position: absolute; bottom: 0; left: 0; right: 0; display: flex; }
                 #chat { flex: 1; border-radius: 0.5rem; background-color: #414141; color: white; padding: 0.5rem 1rem; border-color: lightblue; }
-				#clear { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer;  }
+				#clear { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer; }
 				#model-select { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 200px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer; }
 				div.think { color: #999; text-style: italic; width: 80px; max-height: 1rem; overflow: hidden; cursor: pointer; }
 				div.think::before { content: 'Thinking...'; }
@@ -158,14 +293,25 @@ function getWebviewContent(webview: vscode.Webview) : string {
                 .message { margin-bottom: 1rem; clear: both; }
                 .user { background-color: #414141; border-radius: 0.5rem; color: white; padding: 0 1rem; float: right; }
                 .bot,.assistant {color: white; padding: 0.5rem 1rem; float: left; }
-				.controls { display: flex; justify-content: space-between; padding: 1rem; }
+				.controls { display: flex; justify-content: space-between; padding: 1rem; align-items: center; }
+				.sessions-container { display: flex; align-items: center; gap: 10px; }
+				#session-select { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.6rem; border: none; background-color: #414141; color: white; cursor: pointer; }
+				.session-btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.6rem; border: none; background-color: #414141; color: white; cursor: pointer; }
+				.session-btn:hover { background-color: #515151; }
 			</style>
 		</head>
 		<body>
 			<h2 style="margin: 1rem;">⚡ Zoomiverse</h2>
 			<div class="controls">
-				<select id="model-select"></select>
-				<button id="clear">Clear</button>
+				<div class="sessions-container">
+					<select id="session-select"></select>
+					<button id="new-session" class="session-btn">New Session</button>
+					<button id="delete-session" class="session-btn">Delete Session</button>
+				</div>
+				<div class="controls-right">
+					<select id="model-select"></select>
+					<button id="clear">Clear</button>
+				</div>
 			</div>
 			<div id="chat-container">
 				<div id="response"></div>
@@ -175,11 +321,13 @@ function getWebviewContent(webview: vscode.Webview) : string {
 			</div>
 
 			<script>
-
 				const chatElement = document.getElementById('chat');
 				const responseDiv = document.getElementById('response');	
 				const modelSelect = document.getElementById('model-select');
-				const clearButton = document.getElementById('clear');			
+				const clearButton = document.getElementById('clear');
+				const sessionSelect = document.getElementById('session-select');
+				const newSessionButton = document.getElementById('new-session');
+				const deleteSessionButton = document.getElementById('delete-session');			
 
 				const vscode = acquireVsCodeApi();
 				let currentMessage = null;
@@ -192,18 +340,28 @@ function getWebviewContent(webview: vscode.Webview) : string {
 					}
 				});
 
+				newSessionButton.addEventListener('click', () => {
+					vscode.postMessage({ command: '${COMMANDS.NEW_SESSION}' });
+				});
+
+				deleteSessionButton.addEventListener('click', () => {					
+					const sessionId = sessionSelect.value;
+					vscode.postMessage({ command: '${COMMANDS.DELETE_SESSION}', sessionId });					
+				});
+
+				sessionSelect.addEventListener('change', (event) => {
+					const sessionId = event.target.value;
+					vscode.postMessage({ command: '${COMMANDS.SWITCH_SESSION}', sessionId });
+				});
+
 				chatElement.addEventListener('keydown', event => {
 					if (event.code === 'Enter' && !event.shiftKey && !running) {
-						
 						event.preventDefault();
-						
 						running = true;								
 						chatElement.disabled = true;	
 						lastPrompt = chatElement.value;	
-
 						const text = chatElement.value;
 						vscode.postMessage({ command: '${COMMANDS.CHAT}', text });
-
 						addMessage('user', '<p>'+text.replace(/\\n/g,'<br>')+'</p>');
 						processResponse();
 					}
@@ -217,18 +375,21 @@ function getWebviewContent(webview: vscode.Webview) : string {
 				});
 
 				clearButton.addEventListener('click', () => {
-                    vscode.postMessage({ command: '${COMMANDS.CLEAR_CHAT}' });
-                });
+					vscode.postMessage({ command: '${COMMANDS.CLEAR_CHAT}' });
+				});
 
 				modelSelect.addEventListener('change', (event) => {
-                    const modelName = event.target.value;
-                    vscode.postMessage({ command: '${COMMANDS.SET_MODEL}', modelName });
+					const modelName = event.target.value;
+					vscode.postMessage({ command: '${COMMANDS.SET_MODEL}', modelName });
 					chatElement.focus();
-                });
+				});
 
 				window.addEventListener('message', event => {
-
 					const message = event.data;
+
+					if (message.command === '${COMMANDS.UPDATE_SESSIONS}') {
+						updateSessionSelect(message.sessions, message.currentSessionId);
+					}
 
 					if (message.command === '${COMMANDS.RESPONSE_START}') {
 						currentMessage = addMessage('bot', '');
@@ -253,13 +414,13 @@ function getWebviewContent(webview: vscode.Webview) : string {
 					}
 
 					if (message.command === '${COMMANDS.CLEAR_CHAT}') {
-                        clearChat();
+						clearChat();
 						currentMessage = null;
-                    }
+					}
 
 					if (message.command === '${COMMANDS.POPULATE_MODELS}') {
-                        populateModelSelect(message.models,message.currentModelName);
-                    }
+						populateModelSelect(message.models,message.currentModelName);
+					}
 					
 					if (message.command === '${COMMANDS.RESTORE_CHAT}') {
 						restoreChat(message.savedChatHistory);
@@ -292,39 +453,50 @@ function getWebviewContent(webview: vscode.Webview) : string {
 
 				function addMessage(role, text) {    
 					const messageDiv = document.createElement('div');                
-                    messageDiv.className = 'message ' + role;
-                    messageDiv.innerHTML = text;
-                    responseDiv.appendChild(messageDiv);
+					messageDiv.className = 'message ' + role;
+					messageDiv.innerHTML = text;
+					responseDiv.appendChild(messageDiv);
 					return messageDiv;
-                }
+				}
 
 				function clearChat() {                    
-                    responseDiv.innerHTML = '';
+					responseDiv.innerHTML = '';
 					resetChat();
-                }
+				}
 
 				function populateModelSelect(data,currentModelName) {
-                    modelSelect.innerHTML = '';
-                    data.models.forEach(model => {
-                        const option = document.createElement('option');
-                        option.value = model.name;
-                        option.text = model.name;
+					modelSelect.innerHTML = '';
+					data.models.forEach(model => {
+						const option = document.createElement('option');
+						option.value = model.name;
+						option.text = model.name;
 						if (model.name === currentModelName) {
 							option.selected = true;
 						}
-                        modelSelect.appendChild(option);
-                    });
-                }
+						modelSelect.appendChild(option);
+					});
+				}
+
+				function updateSessionSelect(sessions, currentSessionId) {
+					sessionSelect.innerHTML = '';
+					sessions.forEach(session => {
+						const option = document.createElement('option');
+						option.value = session.id;
+						option.text = session.name;
+						if (session.id === currentSessionId) {
+							option.selected = true;
+						}
+						sessionSelect.appendChild(option);
+					});
+				}
 
 				chatElement.focus();
 				vscode.postMessage({ command: '${COMMANDS.GET_MODELS}' });
-
 			</script>
 		</body>
 		</html>
 	`;
 }
-
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
