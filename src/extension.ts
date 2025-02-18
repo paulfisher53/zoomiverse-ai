@@ -345,10 +345,12 @@ function getWebviewContent(webview: vscode.Webview): string {
     <head>
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://unpkg.com; style-src 'unsafe-inline' https://unpkg.com;">
       
-      <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/atom-one-dark.min.css">
+      <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/atom-one-dark.min.css"/>
+      <link rel="stylesheet" href="https://unpkg.com/highlightjs-copy/dist/highlightjs-copy.min.css"/>
+
       <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
-      
       <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/languages/javascript.min.js"></script>
+      <script src="https://unpkg.com/highlightjs-copy/dist/highlightjs-copy.min.js"></script>
 
       <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -380,6 +382,13 @@ function getWebviewContent(webview: vscode.Webview): string {
           border-radius: 4px;
           font-size: 12px;
           display: none;
+        }
+        .hljs-copy-button {
+          width: 60px;
+          text-indent: unset;
+        }
+        .hljs-copy-button:before {
+          content: unset;
         }
       </style>
     </head>
@@ -413,6 +422,12 @@ function getWebviewContent(webview: vscode.Webview): string {
         const newSessionButton = document.getElementById('new-session');
         const deleteSessionButton = document.getElementById('delete-session');			
         const tokenStats = document.getElementById('token-stats');
+
+        hljs.addPlugin(
+          new CopyButtonPlugin({
+            autohide: false
+          })
+        );
 
         const vscode = acquireVsCodeApi();
         let currentMessage = null;
