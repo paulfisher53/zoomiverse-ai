@@ -353,25 +353,110 @@ function getWebviewContent(webview: vscode.Webview): string {
       <script src="https://unpkg.com/highlightjs-copy/dist/highlightjs-copy.min.js"></script>
 
       <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
-        #chat-container { display: flex; flex-direction: column; flex: 1; }
-        #response { flex: 1; margin: 1rem; padding: 1rem; max-height: calc(100vh - 200px); overflow-y: auto; padding-bottom: 30px; box-sizing: border-box; max-width: 90%; }
-        #chat-input { font-family: Arial, sans-serif; position: absolute; bottom: 0; left: 0; right: 0; display: flex; }
-        #chat { flex: 1; border-radius: 0.5rem; background-color: #414141; color: white; padding: 0.5rem 1rem; border-color: lightblue; }
-        #clear { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 80px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer; }
-        #model-select { padding: 0.5rem 1rem; border-radius: 0.5rem; display: inline-block; width: 200px; font-size: 0.6rem; border: none; background-color: transparent; color: white; cursor: pointer; }
-        div.think { color: #999; text-style: italic; width: 80px; max-height: 1rem; overflow: hidden; cursor: pointer; }
-        div.think::before { content: 'Thinking...'; }
-        .expanded div.think::before { content: ''; }
-        .expanded div.think { max-height: unset; width: unset; }
-        .message { margin-bottom: 1rem; clear: both; }
-        .user { background-color: #414141; border-radius: 0.5rem; color: white; padding: 0 1rem; float: right; }
-        .bot,.assistant {color: white; padding: 0.5rem 1rem; float: left; }
-        .controls { display: flex; justify-content: space-between; padding: 1rem; align-items: center; }
-        .sessions-container { display: flex; align-items: center; gap: 10px; }
-        #session-select { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.6rem; border: none; background-color: #414141; color: white; cursor: pointer; }
-        .session-btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.6rem; border: none; background-color: #414141; color: white; cursor: pointer; }
-        .session-btn:hover { background-color: #515151; }
+        body {
+          padding: 0 var(--container-padding);
+          color: var(--vscode-foreground);
+          font-size: var(--vscode-font-size);
+          font-weight: var(--vscode-font-weight);
+          font-family: var(--vscode-font-family);
+          background-color: var(--vscode-editor-background);
+          display: flex;
+          flex-direction: column;
+          height: 100vh;
+        }
+        #chat-container {
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+        }
+        #response {
+          flex: 1;
+          margin: 1rem;
+          padding: 1rem;
+          max-height: calc(100vh - 200px);
+          overflow-y: auto;
+          padding-bottom: 30px;
+          box-sizing: border-box;
+          max-width: 90%;
+        }
+        #chat-input {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          display: flex;
+        }
+        #chat {
+          flex: 1;
+          border: none;
+          font-family: var(--vscode-font-family);
+          padding: 1rem;
+          color: var(--vscode-input-foreground);
+          outline-color: var(--vscode-input-border);
+          background-color: var(--vscode-input-background);
+        }
+        #chat:placeholder {
+          color: var(--vscode-input-placeholderForeground);
+        }
+        .button {
+          padding: 0.5rem 0.7rem;
+          border-radius: 0.3rem;
+          display: inline-block;
+          font-size: 0.6rem;
+          border: none;
+          background-color: var(--vscode-button-background);
+          color: var(--vscode-button-foreground);
+          cursor: pointer;
+        }
+        .button:hover {
+          background-color: var(--vscode-button-hoverBackground);
+        }
+        div.think {
+          color: var(--vscode-textLink-activeForeground);
+          text-style: italic;
+          width: 80px;
+          max-height: 1rem;
+          overflow: hidden;
+          cursor: pointer;
+        }
+        div.think::before {
+          content: "Thinking...";
+        }
+        .expanded div.think::before {
+          content: "";
+        }
+        .expanded div.think {
+          max-height: unset;
+          width: unset;
+        }
+        .message {
+          margin-bottom: 1rem;
+          clear: both;
+        }
+        .user {
+          border-radius: 0.5rem;
+          color: var(--vscode-input-foreground);
+          background-color: var(--vscode-input-background);
+          padding: 0 1rem;
+          float: right;
+        }
+        .bot,
+        .assistant {
+          color: var(--vscode-foreground);
+          padding: 0.5rem 1rem;
+          float: left;
+        }
+        .controls {
+          display: flex;
+          justify-content: space-between;
+          padding: 1rem;
+          align-items: center;
+        }
+        .sessions-container {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
         #token-stats {
           position: fixed;
           bottom: 80px;
@@ -390,19 +475,20 @@ function getWebviewContent(webview: vscode.Webview): string {
         .hljs-copy-button:before {
           content: unset;
         }
+
       </style>
     </head>
     <body>
       <h2 style="margin: 1rem;">⚡ Zoomiverse</h2>
       <div class="controls">
         <div class="sessions-container">
-          <select id="session-select"></select>
-          <button id="new-session" class="session-btn">New Session</button>
-          <button id="delete-session" class="session-btn">Delete Session</button>
+          <select id="session-select" class="button"></select>
+          <button id="new-session" class="button">New</button>
+          <button id="delete-session" class="button">Delete</button>
         </div>
         <div class="controls-right">
-          <select id="model-select"></select>
-          <button id="clear">Clear</button>
+          <select id="model-select" class="button"></select>
+          <button id="clear" class="button">Clear</button>
         </div>
       </div>
       <div id="chat-container">
@@ -423,11 +509,22 @@ function getWebviewContent(webview: vscode.Webview): string {
         const deleteSessionButton = document.getElementById('delete-session');			
         const tokenStats = document.getElementById('token-stats');
 
-        hljs.addPlugin(
-          new CopyButtonPlugin({
+        let copyPlugin = null;
+
+        function enableCopyButton() {
+          copyPlugin = new CopyButtonPlugin({
             autohide: false
-          })
-        );
+          });
+          hljs.addPlugin(copyPlugin);
+        }
+        enableCopyButton();
+
+        function disableCopyButton() {
+          if(copyPlugin){
+            hljs.removePlugin(copyPlugin);
+            copyPlugin = null;
+          }
+        }
 
         const vscode = acquireVsCodeApi();
         let currentMessage = null;
@@ -492,6 +589,7 @@ function getWebviewContent(webview: vscode.Webview): string {
           }
 
           if (message.command === '${COMMANDS.RESPONSE_START}') {
+            disableCopyButton();
             currentMessage = addMessage('bot', '');
             currentMessage.style.cursor = 'pointer';
             currentMessage.addEventListener('click', () => {
@@ -514,7 +612,15 @@ function getWebviewContent(webview: vscode.Webview): string {
           if (message.command === '${COMMANDS.RESPONSE_COMPLETE}') {
             currentMessage.innerHTML = currentMessage.innerHTML.replace('•••', '');
             currentMessage.style.cursor = '';
+            const codeBlocks = currentMessage.getElementsByTagName('code');
+            for (let i = 0; i < codeBlocks.length; i++) {
+              if(codeBlocks[i].dataset?.highlighted){
+                delete codeBlocks[i].dataset.highlighted;
+              }
+            }
             currentMessage = null;
+            enableCopyButton();
+            processResponse();
             resetChat();
           }
 
