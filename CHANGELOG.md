@@ -1,3 +1,7 @@
+## [0.3.1]
+
+- Update token count function
+
 ## [0.3.0]
 
 - Add token stats
