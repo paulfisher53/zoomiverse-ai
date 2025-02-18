@@ -1,3 +1,9 @@
+## [0.3.0]
+
+- Add token stats
+- Add copy button to code blocks
+- Fix styling
+
 ## [0.2.0]
 
 - Chat sessions
