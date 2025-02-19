@@ -5,6 +5,11 @@ import { marked } from "marked";
 interface ChatMessage {
   role: string;
   content: string;
+  timings?: {
+    prompt: number;
+    response: number;
+    thinking: number;
+  };
 }
 
 interface ChatSession {
@@ -114,6 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
         savedChatHistory: messageHistory.map((message) => ({
           role: message.role,
           content: marked(message.content),
+          timings: message.timings,
         })),
       });
 
@@ -200,6 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
               savedChatHistory: messageHistory.map((message) => ({
                 role: message.role,
                 content: marked(message.content),
+                timings: message.timings,
               })),
             });
           }
@@ -233,6 +240,7 @@ export function activate(context: vscode.ExtensionContext) {
               savedChatHistory: messageHistory.map((message) => ({
                 role: message.role,
                 content: marked(message.content),
+                timings: message.timings,
               })),
             });
           }
@@ -243,12 +251,20 @@ export function activate(context: vscode.ExtensionContext) {
 
           messageHistory.push({ role: "user", content: message.text });
 
+          const timings = {
+            prompt: Date.now(),
+            response: Date.now(),
+            thinking: 0,
+          };
+
           try {
             const streamResponse = await ollama.chat({
               model: currentModelName,
               messages: messageHistory,
               stream: true,
             });
+
+            timings.prompt = Date.now() - timings.prompt;
 
             panel.webview.postMessage({
               command: COMMANDS.RESPONSE_START,
@@ -264,6 +280,13 @@ export function activate(context: vscode.ExtensionContext) {
                 part.eval_count || stringToTokenCount(part.message.content);
               part.eval_duration = part.eval_duration || Date.now() - startTime;
               startTime = Date.now();
+
+              if (part.message.content.includes("<think>")) {
+                timings.thinking = Date.now();
+              }
+              if (part.message.content.includes("</think>")) {
+                timings.thinking = Date.now() - timings.thinking;
+              }
 
               responseText += part.message.content;
               totalTokens += Math.round(part.eval_count);
@@ -282,8 +305,17 @@ export function activate(context: vscode.ExtensionContext) {
               });
             }
 
-            messageHistory.push({ role: "assistant", content: responseText });
-            panel.webview.postMessage({ command: COMMANDS.RESPONSE_COMPLETE });
+            timings.response = Date.now() - timings.response - timings.thinking;
+
+            messageHistory.push({
+              role: "assistant",
+              content: responseText,
+              timings,
+            });
+            panel.webview.postMessage({
+              command: COMMANDS.RESPONSE_COMPLETE,
+              timings,
+            });
           } catch (e) {
             if (String(e).startsWith("AbortError")) {
               return;
@@ -443,8 +475,8 @@ function getWebviewContent(webview: vscode.Webview): string {
         }
         .user {
           border-radius: 0.5rem;
-          color: var(--vscode-input-foreground);
-          background-color: var(--vscode-input-background);
+          color: #FFF;
+          background-color: #333;
           padding: 0 1rem;
           float: right;
         }
@@ -483,7 +515,10 @@ function getWebviewContent(webview: vscode.Webview): string {
         .hljs-copy-button:before {
           content: unset;
         }
-
+        small {
+          color: #999;
+          font-size: 0.7rem;
+        }
       </style>
     </head>
     <body>
@@ -626,6 +661,11 @@ function getWebviewContent(webview: vscode.Webview): string {
                 delete codeBlocks[i].dataset.highlighted;
               }
             }
+            if(message.timings){
+              currentMessage.innerHTML += '<small>Prompt: ' + message.timings.prompt + 'ms | ' +
+                (message.timings.thinking?'Thinking: ' + message.timings.thinking + 'ms | ':'') +
+                'Response: ' + message.timings.response + 'ms</small>';
+            }
             currentMessage = null;
             enableCopyButton();
             processResponse();
@@ -656,10 +696,10 @@ function getWebviewContent(webview: vscode.Webview): string {
           return text.replace('<think>', '<div class="think">').replace('</think>', '</div>');
         }
 
-        function restoreChat(savedChatHistory) {
+        function restoreChat(savedChatHistory) {          
           responseDiv.innerHTML = '';
           savedChatHistory.forEach(message => {
-            addMessage(message.role, fixThinkTags(message.content));
+            addMessage(message.role, fixThinkTags(message.content), message.timings);
           });
           processResponse();
         }
@@ -671,10 +711,15 @@ function getWebviewContent(webview: vscode.Webview): string {
           chatElement.focus();
         }
 
-        function addMessage(role, text) {    
+        function addMessage(role, text, timings) {    
           const messageDiv = document.createElement('div');                
           messageDiv.className = 'message ' + role;
           messageDiv.innerHTML = text;
+          if(timings){
+            messageDiv.innerHTML += '<small>Prompt: ' + timings.prompt + 'ms | ' +
+              (timings.thinking?'Thinking: ' + timings.thinking + 'ms | ':'') +
+              'Response: ' + timings.response + 'ms</small>';
+          }
           responseDiv.appendChild(messageDiv);
           return messageDiv;
         }
