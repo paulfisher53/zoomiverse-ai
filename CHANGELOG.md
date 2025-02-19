@@ -1,3 +1,7 @@
+## [0.4.0]
+
+- Save timings against response
+
 ## [0.3.1]
 
 - Update token count function
