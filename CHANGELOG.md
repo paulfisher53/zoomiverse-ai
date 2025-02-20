@@ -1,3 +1,8 @@
+## [0.5.0]
+
+- Add button to status bar
+- Add a stop button
+
 ## [0.4.0]
 
 - Save timings against response

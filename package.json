@@ -2,7 +2,7 @@
   "name": "zoomiverse-ai",
   "displayName": "Zoomiverse",
   "description": "AI Chat Client",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "icon": "icons/Bolt.png",
   "publisher": "ZoomApps",
   "repository": {
