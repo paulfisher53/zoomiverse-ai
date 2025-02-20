@@ -57,159 +57,144 @@ function stringToTokenCount(text: string): number {
   return tokenCount;
 }
 
+let currentWebview: vscode.WebviewPanel | undefined;
+
 export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand(
     "zoomiverse-ai.start",
     () => {
-      let messageHistory: ChatMessage[] = [];
-      const configuration = vscode.workspace.getConfiguration("zoomiverse-ai");
-      const panel = vscode.window.createWebviewPanel(
-        "zoomiverse-ai",
-        "Chat Window",
-        vscode.ViewColumn.Beside,
-        { enableScripts: true, retainContextWhenHidden: true }
-      );
+      if (!currentWebview) {
+        createWebview(context);
+      } else {
+        if (currentWebview.visible) {
+          currentWebview.dispose();
+        } else {
+          showWebview(currentWebview);
+        }
+      }
+    }
+  );
 
-      panel.webview.html = getWebviewContent(panel.webview);
+  context.subscriptions.push(disposable);
 
-      // Load settings
-      let currentModelName = configuration.get<string>(
-        CONFIG.MODEL,
-        "deepseek-r1:1.5b"
-      );
+  let statusBar = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    100
+  );
+  statusBar.text = "Zoomiverse";
+  statusBar.tooltip = "Click to open Zoomiverse chat";
+  statusBar.command = "zoomiverse-ai.start";
 
-      // Load sessions
+  // Show the status bar item
+  statusBar.show();
+
+  context.subscriptions.push(statusBar);
+}
+
+function createWebview(context: vscode.ExtensionContext) {
+  let messageHistory: ChatMessage[] = [];
+  const configuration = vscode.workspace.getConfiguration("zoomiverse-ai");
+  const panel = vscode.window.createWebviewPanel(
+    "zoomiverse-ai",
+    "Chat Window",
+    vscode.ViewColumn.Beside,
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+
+  panel.webview.html = getWebviewContent(panel.webview);
+
+  // Load settings
+  let currentModelName = configuration.get<string>(
+    CONFIG.MODEL,
+    "deepseek-r1:1.5b"
+  );
+
+  // Load sessions
+  const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+  let currentSessionId = context.globalState.get<string>(
+    STATE.currentSessionId,
+    ""
+  );
+
+  // Create default session if none exists
+  if (sessions.length === 0) {
+    const defaultSession: ChatSession = {
+      id: generateId(),
+      name: "Default Session",
+      messages: [],
+      timestamp: Date.now(),
+    };
+    sessions.push(defaultSession);
+    currentSessionId = defaultSession.id;
+    context.globalState.update(STATE.sessions, sessions);
+    context.globalState.update(STATE.currentSessionId, currentSessionId);
+  }
+
+  // Load current session
+  const currentSession =
+    sessions.find((s) => s.id === currentSessionId) || sessions[0];
+  messageHistory = [...currentSession.messages];
+
+  // Update UI with sessions and messages
+  panel.webview.postMessage({
+    command: COMMANDS.UPDATE_SESSIONS,
+    sessions: sessions,
+    currentSessionId: currentSessionId,
+  });
+
+  panel.webview.postMessage({
+    command: COMMANDS.RESTORE_CHAT,
+    savedChatHistory: messageHistory.map((message) => ({
+      role: message.role,
+      content: marked(message.content),
+      timings: message.timings,
+    })),
+  });
+
+  panel.webview.onDidReceiveMessage(async (message) => {
+    async function saveCurrentSession() {
       const sessions = context.globalState.get<ChatSession[]>(
         STATE.sessions,
         []
       );
-      let currentSessionId = context.globalState.get<string>(
-        STATE.currentSessionId,
-        ""
-      );
-
-      // Create default session if none exists
-      if (sessions.length === 0) {
-        const defaultSession: ChatSession = {
-          id: generateId(),
-          name: "Default Session",
-          messages: [],
-          timestamp: Date.now(),
-        };
-        sessions.push(defaultSession);
-        currentSessionId = defaultSession.id;
-        context.globalState.update(STATE.sessions, sessions);
-        context.globalState.update(STATE.currentSessionId, currentSessionId);
+      const sessionIndex = sessions.findIndex((s) => s.id === currentSessionId);
+      if (sessionIndex !== -1) {
+        sessions[sessionIndex].messages = messageHistory;
+        sessions[sessionIndex].timestamp = Date.now();
+        await context.globalState.update(STATE.sessions, sessions);
       }
+    }
 
-      // Load current session
-      const currentSession =
-        sessions.find((s) => s.id === currentSessionId) || sessions[0];
-      messageHistory = [...currentSession.messages];
+    if (message.command === COMMANDS.CLEAR_CHAT) {
+      ollama.abort();
+      panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
+      messageHistory = [];
+      await saveCurrentSession();
+    }
 
-      // Update UI with sessions and messages
-      panel.webview.postMessage({
-        command: COMMANDS.UPDATE_SESSIONS,
-        sessions: sessions,
-        currentSessionId: currentSessionId,
-      });
+    if (message.command === COMMANDS.NEW_SESSION) {
+      vscode.window
+        .showInputBox({
+          prompt: "Enter a name for the new session",
+        })
+        .then(async (name) => {
+          if (!name) {
+            return;
+          }
 
-      panel.webview.postMessage({
-        command: COMMANDS.RESTORE_CHAT,
-        savedChatHistory: messageHistory.map((message) => ({
-          role: message.role,
-          content: marked(message.content),
-          timings: message.timings,
-        })),
-      });
-
-      panel.webview.onDidReceiveMessage(async (message) => {
-        async function saveCurrentSession() {
+          const newSession: ChatSession = {
+            id: generateId(),
+            name: name,
+            messages: [],
+            timestamp: Date.now(),
+          };
           const sessions = context.globalState.get<ChatSession[]>(
             STATE.sessions,
             []
           );
-          const sessionIndex = sessions.findIndex(
-            (s) => s.id === currentSessionId
-          );
-          if (sessionIndex !== -1) {
-            sessions[sessionIndex].messages = messageHistory;
-            sessions[sessionIndex].timestamp = Date.now();
-            await context.globalState.update(STATE.sessions, sessions);
-          }
-        }
-
-        if (message.command === COMMANDS.CLEAR_CHAT) {
-          ollama.abort();
-          panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
+          sessions.push(newSession);
+          currentSessionId = newSession.id;
           messageHistory = [];
-          await saveCurrentSession();
-        }
-
-        if (message.command === COMMANDS.NEW_SESSION) {
-          vscode.window
-            .showInputBox({
-              prompt: "Enter a name for the new session",
-            })
-            .then(async (name) => {
-              if (!name) {
-                return;
-              }
-
-              const newSession: ChatSession = {
-                id: generateId(),
-                name: name,
-                messages: [],
-                timestamp: Date.now(),
-              };
-              const sessions = context.globalState.get<ChatSession[]>(
-                STATE.sessions,
-                []
-              );
-              sessions.push(newSession);
-              currentSessionId = newSession.id;
-              messageHistory = [];
-              await context.globalState.update(STATE.sessions, sessions);
-              await context.globalState.update(
-                STATE.currentSessionId,
-                currentSessionId
-              );
-              panel.webview.postMessage({
-                command: COMMANDS.UPDATE_SESSIONS,
-                sessions: sessions,
-                currentSessionId: currentSessionId,
-              });
-              panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
-            });
-        }
-
-        if (message.command === COMMANDS.DELETE_SESSION) {
-          let sessions = context.globalState.get<ChatSession[]>(
-            STATE.sessions,
-            []
-          );
-          sessions = sessions.filter((s) => s.id !== message.sessionId);
-          if (sessions.length === 0) {
-            const defaultSession: ChatSession = {
-              id: generateId(),
-              name: "Default Session",
-              messages: [],
-              timestamp: Date.now(),
-            };
-            sessions.push(defaultSession);
-          }
-          if (currentSessionId === message.sessionId) {
-            currentSessionId = sessions[0].id;
-            messageHistory = [...sessions[0].messages];
-            panel.webview.postMessage({
-              command: COMMANDS.RESTORE_CHAT,
-              savedChatHistory: messageHistory.map((message) => ({
-                role: message.role,
-                content: marked(message.content),
-                timings: message.timings,
-              })),
-            });
-          }
           await context.globalState.update(STATE.sessions, sessions);
           await context.globalState.update(
             STATE.currentSessionId,
@@ -220,158 +205,197 @@ export function activate(context: vscode.ExtensionContext) {
             sessions: sessions,
             currentSessionId: currentSessionId,
           });
-        }
+          panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
+        });
+    }
 
-        if (message.command === COMMANDS.SWITCH_SESSION) {
-          const sessions = context.globalState.get<ChatSession[]>(
-            STATE.sessions,
-            []
-          );
-          const session = sessions.find((s) => s.id === message.sessionId);
-          if (session) {
-            currentSessionId = session.id;
-            messageHistory = [...session.messages];
-            await context.globalState.update(
-              STATE.currentSessionId,
-              currentSessionId
-            );
-            panel.webview.postMessage({
-              command: COMMANDS.RESTORE_CHAT,
-              savedChatHistory: messageHistory.map((message) => ({
-                role: message.role,
-                content: marked(message.content),
-                timings: message.timings,
-              })),
-            });
-          }
-        }
-
-        if (message.command === COMMANDS.CHAT) {
-          let responseText = "";
-
-          messageHistory.push({ role: "user", content: message.text });
-
-          const timings = {
-            prompt: Date.now(),
-            response: Date.now(),
-            thinking: 0,
-          };
-
-          try {
-            const streamResponse = await ollama.chat({
-              model: currentModelName,
-              messages: messageHistory,
-              stream: true,
-            });
-
-            timings.prompt = Date.now() - timings.prompt;
-
-            panel.webview.postMessage({
-              command: COMMANDS.RESPONSE_START,
-            });
-
-            let totalTokens = 0;
-            let totalSeconds = 0;
-
-            let startTime = Date.now();
-
-            for await (const part of streamResponse) {
-              part.eval_count =
-                part.eval_count || stringToTokenCount(part.message.content);
-              part.eval_duration = part.eval_duration || Date.now() - startTime;
-              startTime = Date.now();
-
-              if (part.message.content.includes("<think>")) {
-                timings.thinking = Date.now();
-              }
-              if (part.message.content.includes("</think>")) {
-                timings.thinking = Date.now() - timings.thinking;
-              }
-
-              responseText += part.message.content;
-              totalTokens += Math.round(part.eval_count);
-
-              // Calculate tokens per second
-              const elapsedSeconds = part.eval_duration / 1000;
-              totalSeconds += elapsedSeconds;
-              const tokensPerSecond = Math.round(totalTokens / totalSeconds);
-
-              const htmlResponse = marked(responseText);
-              panel.webview.postMessage({
-                command: COMMANDS.RESPONSE,
-                text: htmlResponse,
-                tokensPerSecond,
-                totalTokens,
-              });
-            }
-
-            timings.response = Date.now() - timings.response - timings.thinking;
-
-            messageHistory.push({
-              role: "assistant",
-              content: responseText,
-              timings,
-            });
-            panel.webview.postMessage({
-              command: COMMANDS.RESPONSE_COMPLETE,
-              timings,
-            });
-          } catch (e) {
-            if (String(e).startsWith("AbortError")) {
-              return;
-            }
-            panel.webview.postMessage({ command: COMMANDS.RESPONSE_START });
-            panel.webview.postMessage({
-              command: COMMANDS.RESPONSE,
-              text: `Error: ${String(e)}`,
-            });
-            panel.webview.postMessage({ command: COMMANDS.RESPONSE_COMPLETE });
-          }
-          await saveCurrentSession();
-        }
-
-        if (message.command === COMMANDS.GET_MODELS) {
-          try {
-            const models = await ollama.list();
-            panel.webview.postMessage({
-              command: COMMANDS.POPULATE_MODELS,
-              models,
-              currentModelName,
-            });
-          } catch (e) {
-            console.error("Failed to fetch models:", e);
-          }
-        }
-
-        if (message.command === COMMANDS.SET_MODEL) {
-          currentModelName = message.modelName;
-          configuration.update(
-            CONFIG.MODEL,
-            currentModelName,
-            vscode.ConfigurationTarget.Global
-          );
-        }
-      });
-
-      panel.onDidDispose(() => {
-        ollama.abort();
-        const sessions = context.globalState.get<ChatSession[]>(
-          STATE.sessions,
-          []
-        );
-        const sessionIndex = sessions.findIndex(
-          (s) => s.id === currentSessionId
-        );
-        if (sessionIndex !== -1) {
-          sessions[sessionIndex].messages = messageHistory;
-          sessions[sessionIndex].timestamp = Date.now();
-          context.globalState.update(STATE.sessions, sessions);
-        }
+    if (message.command === COMMANDS.DELETE_SESSION) {
+      let sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+      sessions = sessions.filter((s) => s.id !== message.sessionId);
+      if (sessions.length === 0) {
+        const defaultSession: ChatSession = {
+          id: generateId(),
+          name: "Default Session",
+          messages: [],
+          timestamp: Date.now(),
+        };
+        sessions.push(defaultSession);
+      }
+      if (currentSessionId === message.sessionId) {
+        currentSessionId = sessions[0].id;
+        messageHistory = [...sessions[0].messages];
+        panel.webview.postMessage({
+          command: COMMANDS.RESTORE_CHAT,
+          savedChatHistory: messageHistory.map((message) => ({
+            role: message.role,
+            content: marked(message.content),
+            timings: message.timings,
+          })),
+        });
+      }
+      await context.globalState.update(STATE.sessions, sessions);
+      await context.globalState.update(
+        STATE.currentSessionId,
+        currentSessionId
+      );
+      panel.webview.postMessage({
+        command: COMMANDS.UPDATE_SESSIONS,
+        sessions: sessions,
+        currentSessionId: currentSessionId,
       });
     }
-  );
 
-  context.subscriptions.push(disposable);
+    if (message.command === COMMANDS.SWITCH_SESSION) {
+      const sessions = context.globalState.get<ChatSession[]>(
+        STATE.sessions,
+        []
+      );
+      const session = sessions.find((s) => s.id === message.sessionId);
+      if (session) {
+        currentSessionId = session.id;
+        messageHistory = [...session.messages];
+        await context.globalState.update(
+          STATE.currentSessionId,
+          currentSessionId
+        );
+        panel.webview.postMessage({
+          command: COMMANDS.RESTORE_CHAT,
+          savedChatHistory: messageHistory.map((message) => ({
+            role: message.role,
+            content: marked(message.content),
+            timings: message.timings,
+          })),
+        });
+      }
+    }
+
+    if (message.command === COMMANDS.CHAT) {
+      let responseText = "";
+
+      messageHistory.push({ role: "user", content: message.text });
+
+      const timings = {
+        prompt: Date.now(),
+        response: Date.now(),
+        thinking: 0,
+      };
+
+      try {
+        const streamResponse = await ollama.chat({
+          model: currentModelName,
+          messages: messageHistory,
+          stream: true,
+        });
+
+        timings.prompt = Date.now() - timings.prompt;
+
+        panel.webview.postMessage({
+          command: COMMANDS.RESPONSE_START,
+        });
+
+        let totalTokens = 0;
+        let totalSeconds = 0;
+
+        let startTime = Date.now();
+
+        for await (const part of streamResponse) {
+          part.eval_count =
+            part.eval_count || stringToTokenCount(part.message.content);
+          part.eval_duration = part.eval_duration || Date.now() - startTime;
+          startTime = Date.now();
+
+          if (part.message.content.includes("<think>")) {
+            timings.thinking = Date.now();
+          }
+          if (part.message.content.includes("</think>")) {
+            timings.thinking = Date.now() - timings.thinking;
+          }
+
+          responseText += part.message.content;
+          totalTokens += Math.round(part.eval_count);
+
+          // Calculate tokens per second
+          const elapsedSeconds = part.eval_duration / 1000;
+          totalSeconds += elapsedSeconds;
+          const tokensPerSecond = Math.round(totalTokens / totalSeconds);
+
+          const htmlResponse = marked(responseText);
+          panel.webview.postMessage({
+            command: COMMANDS.RESPONSE,
+            text: htmlResponse,
+            tokensPerSecond,
+            totalTokens,
+          });
+        }
+
+        timings.response = Date.now() - timings.response - timings.thinking;
+
+        messageHistory.push({
+          role: "assistant",
+          content: responseText,
+          timings,
+        });
+        panel.webview.postMessage({
+          command: COMMANDS.RESPONSE_COMPLETE,
+          timings,
+        });
+      } catch (e) {
+        if (String(e).startsWith("AbortError")) {
+          return;
+        }
+        panel.webview.postMessage({ command: COMMANDS.RESPONSE_START });
+        panel.webview.postMessage({
+          command: COMMANDS.RESPONSE,
+          text: `Error: ${String(e)}`,
+        });
+        panel.webview.postMessage({ command: COMMANDS.RESPONSE_COMPLETE });
+      }
+      await saveCurrentSession();
+    }
+
+    if (message.command === COMMANDS.GET_MODELS) {
+      try {
+        const models = await ollama.list();
+        panel.webview.postMessage({
+          command: COMMANDS.POPULATE_MODELS,
+          models,
+          currentModelName,
+        });
+      } catch (e) {
+        console.error("Failed to fetch models:", e);
+      }
+    }
+
+    if (message.command === COMMANDS.SET_MODEL) {
+      currentModelName = message.modelName;
+      configuration.update(
+        CONFIG.MODEL,
+        currentModelName,
+        vscode.ConfigurationTarget.Global
+      );
+    }
+  });
+
+  panel.onDidDispose(() => {
+    ollama.abort();
+    const sessions = context.globalState.get<ChatSession[]>(STATE.sessions, []);
+    const sessionIndex = sessions.findIndex((s) => s.id === currentSessionId);
+    if (sessionIndex !== -1) {
+      sessions[sessionIndex].messages = messageHistory;
+      sessions[sessionIndex].timestamp = Date.now();
+      context.globalState.update(STATE.sessions, sessions);
+    }
+  });
+
+  currentWebview = panel;
+
+  currentWebview.onDidDispose(() => {
+    currentWebview = undefined;
+  });
+}
+
+function showWebview(webview: vscode.WebviewPanel) {
+  webview.reveal(vscode.ViewColumn.Beside);
 }
 
 function generateId(): string {
