@@ -25,6 +25,7 @@ const COMMANDS = {
   RESPONSE: "chatResponse",
   RESPONSE_COMPLETE: "chatResponseComplete",
   CLEAR_CHAT: "clearChat",
+  STOP_CHAT: "stopChat",
   POPULATE_MODELS: "populateModels",
   SET_MODEL: "setModel",
   GET_MODELS: "getModels",
@@ -151,6 +152,13 @@ function createWebview(context: vscode.ExtensionContext) {
     })),
   });
 
+  let responseText = "";
+  let timings = {
+    prompt: Date.now(),
+    response: Date.now(),
+    thinking: 0,
+  };
+
   panel.webview.onDidReceiveMessage(async (message) => {
     async function saveCurrentSession() {
       const sessions = context.globalState.get<ChatSession[]>(
@@ -165,11 +173,35 @@ function createWebview(context: vscode.ExtensionContext) {
       }
     }
 
+    async function saveResponse() {
+      if (responseText.length > 0) {
+        timings.response = Date.now() - timings.response - timings.thinking;
+
+        messageHistory.push({
+          role: "assistant",
+          content: responseText,
+          timings,
+        });
+
+        panel.webview.postMessage({
+          command: COMMANDS.RESPONSE_COMPLETE,
+          timings,
+        });
+
+        await saveCurrentSession();
+      }
+    }
+
     if (message.command === COMMANDS.CLEAR_CHAT) {
       ollama.abort();
       panel.webview.postMessage({ command: COMMANDS.CLEAR_CHAT });
       messageHistory = [];
       await saveCurrentSession();
+    }
+
+    if (message.command === COMMANDS.STOP_CHAT) {
+      ollama.abort();
+      await saveResponse();
     }
 
     if (message.command === COMMANDS.NEW_SESSION) {
@@ -270,15 +302,12 @@ function createWebview(context: vscode.ExtensionContext) {
     }
 
     if (message.command === COMMANDS.CHAT) {
-      let responseText = "";
-
       messageHistory.push({ role: "user", content: message.text });
 
-      const timings = {
-        prompt: Date.now(),
-        response: Date.now(),
-        thinking: 0,
-      };
+      responseText = "";
+      timings.prompt = Date.now();
+      timings.response = Date.now();
+      timings.thinking = 0;
 
       try {
         const streamResponse = await ollama.chat({
@@ -297,6 +326,7 @@ function createWebview(context: vscode.ExtensionContext) {
         let totalSeconds = 0;
 
         let startTime = Date.now();
+        let startThinking = 0;
 
         for await (const part of streamResponse) {
           part.eval_count =
@@ -305,10 +335,10 @@ function createWebview(context: vscode.ExtensionContext) {
           startTime = Date.now();
 
           if (part.message.content.includes("<think>")) {
-            timings.thinking = Date.now();
+            startThinking = Date.now();
           }
           if (part.message.content.includes("</think>")) {
-            timings.thinking = Date.now() - timings.thinking;
+            timings.thinking = Date.now() - startThinking;
           }
 
           responseText += part.message.content;
@@ -328,17 +358,7 @@ function createWebview(context: vscode.ExtensionContext) {
           });
         }
 
-        timings.response = Date.now() - timings.response - timings.thinking;
-
-        messageHistory.push({
-          role: "assistant",
-          content: responseText,
-          timings,
-        });
-        panel.webview.postMessage({
-          command: COMMANDS.RESPONSE_COMPLETE,
-          timings,
-        });
+        await saveResponse();
       } catch (e) {
         if (String(e).startsWith("AbortError")) {
           return;
@@ -350,7 +370,6 @@ function createWebview(context: vscode.ExtensionContext) {
         });
         panel.webview.postMessage({ command: COMMANDS.RESPONSE_COMPLETE });
       }
-      await saveCurrentSession();
     }
 
     if (message.command === COMMANDS.GET_MODELS) {
@@ -540,8 +559,8 @@ function getWebviewContent(webview: vscode.Webview): string {
           content: unset;
         }
         small {
-          color: #999;
-          font-size: 0.7rem;
+          color: #666;
+          font-size: 0.6rem;
         }
       </style>
     </head>
@@ -555,7 +574,7 @@ function getWebviewContent(webview: vscode.Webview): string {
         </div>
         <div class="controls-right">
           <select id="model-select" class="button"></select>
-          <button id="clear" class="button">Clear</button>
+          <button id="clear" class="button">Clear</button>          
         </div>
       </div>
       <div id="chat-container">
@@ -565,7 +584,7 @@ function getWebviewContent(webview: vscode.Webview): string {
           <textarea id="chat" rows="3" placeholder="Ask something..."></textarea>
         </div>
       </div>
-
+      <button id="stop" class="button" style="display: none;position: absolute;right: 10px;bottom: 25px;">Stop</button>
       <script>
         const chatElement = document.getElementById('chat');
         const responseDiv = document.getElementById('response');	
@@ -575,6 +594,7 @@ function getWebviewContent(webview: vscode.Webview): string {
         const newSessionButton = document.getElementById('new-session');
         const deleteSessionButton = document.getElementById('delete-session');			
         const tokenStats = document.getElementById('token-stats');
+        const stopButton = document.getElementById('stop');
 
         let copyPlugin = null;
 
@@ -642,6 +662,10 @@ function getWebviewContent(webview: vscode.Webview): string {
           vscode.postMessage({ command: '${COMMANDS.CLEAR_CHAT}' });
         });
 
+        stopButton.addEventListener('click', () => {
+          vscode.postMessage({ command: '${COMMANDS.STOP_CHAT}' }); 
+        });
+
         modelSelect.addEventListener('change', (event) => {
           const modelName = event.target.value;
           vscode.postMessage({ command: '${COMMANDS.SET_MODEL}', modelName });
@@ -666,6 +690,7 @@ function getWebviewContent(webview: vscode.Webview): string {
             });
             tokenStats.style.display = 'block';
             tokenStats.textContent = 'Starting...';
+            stopButton.style.display = 'inline-block';
           }
 
           if (message.command === '${COMMANDS.RESPONSE}') {
@@ -693,7 +718,7 @@ function getWebviewContent(webview: vscode.Webview): string {
             currentMessage = null;
             enableCopyButton();
             processResponse();
-            resetChat();
+            resetChat();            
           }
 
           if (message.command === '${COMMANDS.CLEAR_CHAT}') {
@@ -733,6 +758,7 @@ function getWebviewContent(webview: vscode.Webview): string {
           chatElement.disabled = false;
           chatElement.value = '';
           chatElement.focus();
+          stopButton.style.display = 'none';
         }
 
         function addMessage(role, text, timings) {    
