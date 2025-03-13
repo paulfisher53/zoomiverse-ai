@@ -1,3 +1,7 @@
+## [0.6.0]
+
+- Add "Save As" button
+
 ## [0.5.0]
 
 - Add button to status bar
