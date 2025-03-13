@@ -16,6 +16,7 @@
     "Other"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [],
   "contributes": {
     "configuration": {
       "type": "object",

@@ -34,6 +34,7 @@ const COMMANDS = {
   DELETE_SESSION: "deleteSession",
   SWITCH_SESSION: "switchSession",
   UPDATE_SESSIONS: "updateSessions",
+  SAVE_AS_SESSION: "saveAsSession",
 };
 
 const STATE = {
@@ -393,6 +394,41 @@ function createWebview(context: vscode.ExtensionContext) {
         vscode.ConfigurationTarget.Global
       );
     }
+
+    if (message.command === COMMANDS.SAVE_AS_SESSION) {
+      vscode.window
+        .showInputBox({
+          prompt: "Enter a name for the new session",
+        })
+        .then(async (name) => {
+          if (!name) {
+            return;
+          }
+
+          const newSession: ChatSession = {
+            id: generateId(),
+            name: name,
+            messages: [...messageHistory], // Copy current message history
+            timestamp: Date.now(),
+          };
+          const sessions = context.globalState.get<ChatSession[]>(
+            STATE.sessions,
+            []
+          );
+          sessions.push(newSession);
+          currentSessionId = newSession.id;
+          await context.globalState.update(STATE.sessions, sessions);
+          await context.globalState.update(
+            STATE.currentSessionId,
+            currentSessionId
+          );
+          panel.webview.postMessage({
+            command: COMMANDS.UPDATE_SESSIONS,
+            sessions: sessions,
+            currentSessionId: currentSessionId,
+          });
+        });
+    }
   });
 
   panel.onDidDispose(() => {
@@ -570,6 +606,7 @@ function getWebviewContent(webview: vscode.Webview): string {
         <div class="sessions-container">
           <select id="session-select" class="button"></select>
           <button id="new-session" class="button">New</button>
+          <button id="save-as-session" class="button">Save As</button>
           <button id="delete-session" class="button">Delete</button>
         </div>
         <div class="controls-right">
@@ -595,6 +632,11 @@ function getWebviewContent(webview: vscode.Webview): string {
         const deleteSessionButton = document.getElementById('delete-session');			
         const tokenStats = document.getElementById('token-stats');
         const stopButton = document.getElementById('stop');
+        const saveAsSessionButton = document.getElementById('save-as-session');
+        
+        saveAsSessionButton.addEventListener('click', () => {
+          vscode.postMessage({ command: '${COMMANDS.SAVE_AS_SESSION}' });
+        });
 
         let copyPlugin = null;
 
